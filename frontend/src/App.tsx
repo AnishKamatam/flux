@@ -8,18 +8,15 @@ import AssessmentIcon from '@mui/icons-material/Assessment'; // Reports
 import InventoryIcon from '@mui/icons-material/Inventory'; // Cash Flow & Inventory
 import SettingsIcon from '@mui/icons-material/Settings'; // Settings
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
+import Transactions from './pages/Transactions';
+import Invoices from './pages/Invoices';
+import Bills from './pages/Bills';
+import Payroll from './pages/Payroll';
+import Reports from './pages/Reports';
+import CashFlowInventory from './pages/CashFlowInventory';
+import Settings from './pages/Settings';
 
 const drawerWidth = 220;
-
-// Transactions Page
-function Transactions() {
-  return (
-    <Box sx={{ color: '#fff' }}>
-      <h2>Transactions</h2>
-      <p>This is the Transactions page.</p>
-    </Box>
-  );
-}
 
 function App() {
   const navItems = [
@@ -115,7 +112,13 @@ function App() {
           <Toolbar sx={{ minHeight: 64 }} />
           <Routes>
             <Route path="/transactions" element={<Transactions />} />
-            {/* Add other routes here as you build them */}
+            <Route path="/invoices" element={<Invoices />} />
+            <Route path="/bills" element={<Bills />} />
+            <Route path="/payroll" element={<Payroll />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/cash-flow" element={<CashFlowInventory />} />
+            <Route path="/settings" element={<Settings />} />
+            {/* Optionally, add a default route/redirect here */}
           </Routes>
         </Box>
       </Box>
