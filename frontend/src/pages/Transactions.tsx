@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
-import { Box, Button, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, useMediaQuery } from '@mui/material';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { Box, Button, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, useMediaQuery, Stepper, Step, StepLabel } from '@mui/material';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts';
+import DeleteIcon from '@mui/icons-material/Delete';
+import IconButton from '@mui/material/IconButton';
+import { Dialog as MuiDialog } from '@mui/material';
 
 const initialCategoryOptions = [
   'Advertising',
@@ -31,11 +34,17 @@ function formatDate(dateStr: string) {
   return `${mm}/${dd}/${yyyy}`;
 }
 
-function formatAmount(amount: string | number) {
+function formatAmount(amount: string | number): string {
   if (amount === '' || amount === null || amount === undefined) return '';
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
-  if (isNaN(num)) return amount;
+  if (isNaN(num)) return String(amount);
   return num.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+function formatMonth(month: string) {
+  const [year, m] = month.split('-');
+  const date = new Date(Number(year), Number(m) - 1);
+  return date.toLocaleString('en-US', { month: 'short', year: 'numeric' });
 }
 
 const COLORS = [
@@ -43,6 +52,28 @@ const COLORS = [
 ];
 
 const fontFamily = `'Inter', 'Montserrat', 'Roboto', Arial, sans-serif`;
+
+// Define a type for Transaction
+interface Transaction {
+  date: string;
+  description: string;
+  amount: number;
+  category: string;
+}
+
+const mockBankTransactions = [
+  { id: 7, date: '2024-06-05', description: 'Zoom License', amount: -706.13, category: 'Technology and Subscriptions Expense' },
+  { id: 8, date: '2024-06-18', description: 'Phone Bill', amount: -1364.76, category: 'Utilities Expense' },
+  { id: 9, date: '2024-06-15', description: 'Domain Hosting', amount: -926.05, category: 'Technology and Subscriptions Expense' },
+  { id: 10, date: '2024-06-17', description: 'Flight to Conference', amount: -1247.15, category: 'Travel and Entertainment Expense' },
+  { id: 11, date: '2024-06-18', description: 'Business Cards', amount: -1480.73, category: 'Sales and Marketing Expense' },
+  { id: 12, date: '2024-06-23', description: 'Cleaning Services', amount: -1437.11, category: 'General and Administrative Expense' },
+  { id: 13, date: '2024-06-19', description: 'Employee Bonus', amount: -143.38, category: 'Payroll Expense' },
+  { id: 14, date: '2024-05-30', description: 'Coffee for Office', amount: -793.25, category: 'General and Administrative Expense' },
+  { id: 15, date: '2024-06-01', description: 'IT Consultant', amount: -1348.78, category: 'Contract Labor Expense' },
+  { id: 16, date: '2024-05-29', description: 'Google Ads', amount: -460.27, category: 'Sales and Marketing Expense' }
+];
+
 
 const Transactions: React.FC = () => {
   const [open, setOpen] = useState(false);
@@ -52,11 +83,22 @@ const Transactions: React.FC = () => {
     amount: '',
     category: '',
   });
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categoryOptions, setCategoryOptions] = useState(initialCategoryOptions);
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Wizard state
+  const [bankWizardOpen, setBankWizardOpen] = useState(false);
+  const [bankStep, setBankStep] = useState(0);
+  const [matchedIds, setMatchedIds] = useState<number[]>([]);
+  const [addedIds, setAddedIds] = useState<number[]>([]);
+
+  // For matching: store [bankTxId, transactionIdx] pairs
+  const [matchDialogOpen, setMatchDialogOpen] = useState(false);
+  const [bankTxToMatch, setBankTxToMatch] = useState<typeof mockBankTransactions[0] | null>(null);
+  const [matchedPairs, setMatchedPairs] = useState<{ bankId: number; txIdx: number }[]>([]);
 
   const handleOpen = () => setOpen(true);
   const handleClose = () => {
@@ -105,12 +147,12 @@ const Transactions: React.FC = () => {
       const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
       const newTxs = lines.slice(1).map(line => {
         const values = line.split(',').map(v => v.trim());
-        const tx: any = {};
+        const tx: Partial<Transaction> = {};
         headers.forEach((h, i) => {
-          tx[h] = values[i] || '';
+          (tx as unknown as Record<string, string>)[h] = values[i] || '';
         });
-        if (tx.amount) tx.amount = parseFloat(tx.amount);
-        return tx;
+        if (tx.amount) tx.amount = parseFloat(tx.amount as unknown as string);
+        return tx as Transaction;
       }).filter(tx => tx.date && tx.description && tx.amount && tx.category);
       setTransactions(prev => [...prev, ...newTxs]);
     };
@@ -134,6 +176,49 @@ const Transactions: React.FC = () => {
     setNewCategory('');
   };
 
+  const handleOpenBankWizard = () => {
+    setBankWizardOpen(true);
+    setBankStep(0);
+    setMatchedIds([]);
+    setAddedIds([]);
+  };
+  const handleCloseBankWizard = () => setBankWizardOpen(false);
+
+  const handleAdd = (id: number) => {
+    setAddedIds(prev => [...prev, id]);
+    const bankTx = mockBankTransactions.find(tx => tx.id === id);
+    if (bankTx) {
+      setTransactions(prev => [
+        ...prev,
+        {
+          date: bankTx.date,
+          description: bankTx.description,
+          amount: bankTx.amount,
+          category: bankTx.category,
+        },
+      ]);
+    }
+  };
+
+  const handleMatch = (id: number) => {
+    const bankTx = mockBankTransactions.find(tx => tx.id === id);
+    setBankTxToMatch(bankTx || null);
+    setMatchDialogOpen(true);
+  };
+
+  const handleSelectMatch = (txIdx: number) => {
+    if (bankTxToMatch) {
+      setMatchedPairs(prev => [...prev, { bankId: bankTxToMatch.id, txIdx }]);
+      setMatchedIds(prev => [...prev, bankTxToMatch.id]);
+      setMatchDialogOpen(false);
+      setBankTxToMatch(null);
+    }
+  };
+
+  const isBankTxMatched = (id: number) => matchedIds.includes(id) || matchedPairs.some(pair => pair.bankId === id);
+
+  const unmatched = mockBankTransactions.filter(tx => !matchedIds.includes(tx.id) && !addedIds.includes(tx.id));
+
   // Pie chart data: sum absolute value of negative (expense) amounts by category
   const expenseData = transactions
     .filter(tx => tx.amount < 0)
@@ -142,6 +227,18 @@ const Transactions: React.FC = () => {
       return acc;
     }, {});
   const pieData = Object.entries(expenseData).map(([category, value]) => ({ name: category, value }));
+
+  // Prepare data for line chart (group by month, sum revenue and expenses)
+  const lineDataMap: Record<string, { month: string; revenue: number; expenses: number }> = {};
+  transactions.forEach(tx => {
+    const d = new Date(tx.date);
+    if (isNaN(d.getTime())) return;
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (!lineDataMap[month]) lineDataMap[month] = { month, revenue: 0, expenses: 0 };
+    if (tx.amount > 0) lineDataMap[month].revenue += tx.amount;
+    if (tx.amount < 0) lineDataMap[month].expenses += Math.abs(tx.amount);
+  });
+  const lineData = Object.values(lineDataMap).sort((a, b) => a.month.localeCompare(b.month));
 
   const isMobile = useMediaQuery('(max-width:900px)');
 
@@ -159,21 +256,31 @@ const Transactions: React.FC = () => {
                 <TableCell sx={{ color: '#fff', fontSize: 18, py: 2, borderBottom: 'none', textAlign: 'left', fontFamily }}>Description</TableCell>
                 <TableCell sx={{ color: '#fff', fontSize: 18, py: 2, borderBottom: 'none', textAlign: 'center', fontFamily }}>Amount</TableCell>
                 <TableCell sx={{ color: '#fff', fontSize: 18, py: 2, borderBottom: 'none', textAlign: 'left', fontFamily }}>Category</TableCell>
+                <TableCell sx={{ color: '#fff', fontSize: 18, py: 2, borderBottom: 'none', textAlign: 'center', fontFamily }}></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {transactions.length === 0 ? null : [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((tx, idx) => (
-                <TableRow key={idx}>
+                <TableRow key={idx} sx={{ '&:hover .delete-btn': { visibility: 'visible' } }}>
                   <TableCell sx={{ color: '#fff', borderBottom: 'none', textAlign: 'center', fontFamily }}>{formatDate(tx.date)}</TableCell>
                   <TableCell sx={{ color: '#fff', borderBottom: 'none', textAlign: 'left', fontFamily }}>{tx.description}</TableCell>
-                  <TableCell sx={{ color: '#fff', borderBottom: 'none', textAlign: 'center', fontFamily }}>{formatAmount(tx.amount)}</TableCell>
+                  <TableCell sx={{ color: tx.amount < 0 ? '#e57373' : '#81c784', borderBottom: 'none', textAlign: 'center', fontFamily }}>{formatAmount(tx.amount)}</TableCell>
                   <TableCell sx={{ color: '#fff', borderBottom: 'none', textAlign: 'left', fontFamily }}>{tx.category}</TableCell>
+                  <TableCell sx={{ color: '#fff', borderBottom: 'none', textAlign: 'center' }}>
+                    <IconButton className="delete-btn" aria-label="delete" size="small" sx={{ visibility: 'hidden' }} onClick={() => {
+                      const sorted = [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                      const txToDelete = sorted[idx];
+                      setTransactions(transactions.filter(t => t !== txToDelete));
+                    }}>
+                      <DeleteIcon sx={{ color: '#e57373' }} />
+                    </IconButton>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </TableContainer>
-        <Box sx={{ width: 900, minHeight: 500, p: 2, ml: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start' }}>
+        <Box sx={{ width: 1000, minHeight: 500, p: 2, ml: -15, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start' }}>
           <Typography variant="h6" sx={{ color: '#fff', mb: 2, fontFamily }}>Expense Breakdown</Typography>
           {pieData.length === 0 ? (
             <Typography sx={{ color: '#aaa', fontFamily }}>No expenses to display</Typography>
@@ -208,6 +315,38 @@ const Transactions: React.FC = () => {
               </Box>
             </Box>
           )}
+          {/* Revenue & Expenses Line Chart */}
+          {transactions.length > 0 && (
+            <Box sx={{ width: '100%', mt: 6, bgcolor: 'transparent', p: 0 }}>
+              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, color: '#fff', fontFamily }}>Revenue & Expenses Over Time</Typography>
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={lineData} margin={{ top: 10, right: 30, left: 60, bottom: 0 }}>
+                  <CartesianGrid stroke="#222" strokeDasharray="4 4" />
+                  <XAxis
+                    dataKey="month"
+                    stroke="#aaa"
+                    fontFamily={fontFamily}
+                    tickFormatter={formatMonth}
+                    tickMargin={10}
+                    padding={{ left: 10, right: 10 }}
+                  />
+                  <YAxis
+                    stroke="#aaa"
+                    fontFamily={fontFamily}
+                    tickFormatter={(value) => formatAmount(value)}
+                    domain={[0, 'auto']}
+                    tickMargin={16}
+                    width={70}
+                    padding={{ top: 10, bottom: 10 }}
+                    style={{ fontSize: 15, fill: '#fff' }}
+                  />
+                  <Tooltip contentStyle={{ background: '#23272a', border: 'none', color: '#fff', fontFamily }} labelStyle={{ color: '#fff' }} formatter={formatAmount} />
+                  <Line type="monotone" dataKey="revenue" stroke="#81c784" strokeWidth={3} dot={false} name="Revenue" />
+                  <Line type="monotone" dataKey="expenses" stroke="#e57373" strokeWidth={3} dot={false} name="Expenses" />
+                </LineChart>
+              </ResponsiveContainer>
+            </Box>
+          )}
         </Box>
       </Box>
       {transactions.length === 0 && (
@@ -216,6 +355,9 @@ const Transactions: React.FC = () => {
         </Box>
       )}
       <Box sx={{ position: 'fixed', bottom: 32, right: 32, zIndex: 1200, display: 'flex', gap: 2 }}>
+        <Button variant="outlined" color="primary" size="large" onClick={handleOpenBankWizard}>
+          Connect to Bank
+        </Button>
         <input
           type="file"
           accept=".csv"
@@ -294,6 +436,172 @@ const Transactions: React.FC = () => {
             <Button type="submit" variant="contained">Add</Button>
           </DialogActions>
         </form>
+      </Dialog>
+      <Dialog open={bankWizardOpen} onClose={handleCloseBankWizard} maxWidth="md" fullWidth>
+        <DialogTitle>Bank Reconciliation</DialogTitle>
+        <DialogContent>
+          <Stepper activeStep={bankStep} alternativeLabel sx={{ mb: 3 }}>
+            <Step><StepLabel>Import Statement</StepLabel></Step>
+            <Step><StepLabel>Match Transactions</StepLabel></Step>
+            <Step><StepLabel>Unmatched</StepLabel></Step>
+            <Step><StepLabel>Summary</StepLabel></Step>
+          </Stepper>
+          {bankStep === 0 && (
+            <Box>
+              <Typography sx={{ mb: 2 }}>Imported bank statement with {mockBankTransactions.length} transactions:</Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Date</TableCell>
+                      <TableCell>Description</TableCell>
+                      <TableCell>Amount</TableCell>
+                      <TableCell>Category</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {mockBankTransactions.map(tx => (
+                      <TableRow key={tx.id}>
+                        <TableCell>{formatDate(tx.date)}</TableCell>
+                        <TableCell>{tx.description}</TableCell>
+                        <TableCell sx={{ color: tx.amount < 0 ? '#e57373' : '#81c784' }}>{formatAmount(tx.amount)}</TableCell>
+                        <TableCell>{tx.category}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          )}
+          {bankStep === 1 && (
+            <Box>
+              <Typography sx={{ mb: 2 }}>Match or add each bank transaction:</Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Date</TableCell>
+                      <TableCell>Description</TableCell>
+                      <TableCell>Amount</TableCell>
+                      <TableCell>Category</TableCell>
+                      <TableCell>Action</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {mockBankTransactions.map(tx => (
+                      <TableRow key={tx.id}>
+                        <TableCell>{formatDate(tx.date)}</TableCell>
+                        <TableCell>{tx.description}</TableCell>
+                        <TableCell sx={{ color: tx.amount < 0 ? '#e57373' : '#81c784' }}>{formatAmount(tx.amount)}</TableCell>
+                        <TableCell>{tx.category}</TableCell>
+                        <TableCell>
+                          {isBankTxMatched(tx.id) ? (
+                            <Typography color="success.main">Matched</Typography>
+                          ) : addedIds.includes(tx.id) ? (
+                            <Typography color="primary.main">Added</Typography>
+                          ) : (
+                            <Box sx={{ display: 'flex', gap: 1 }}>
+                              <Button size="small" variant="outlined" color="success" onClick={() => handleMatch(tx.id)}>Match</Button>
+                              <Button size="small" variant="contained" color="primary" onClick={() => handleAdd(tx.id)}>Add</Button>
+                            </Box>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              {/* Match dialog */}
+              <MuiDialog open={matchDialogOpen} onClose={() => setMatchDialogOpen(false)} maxWidth="sm" fullWidth>
+                <DialogTitle>Select Transaction to Match</DialogTitle>
+                <DialogContent>
+                  <Typography sx={{ mb: 2 }}>Select a transaction from your ledger to match with:<br /><b>{bankTxToMatch?.description}</b> ({formatAmount(bankTxToMatch?.amount || 0)})</Typography>
+                  <TableContainer>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Date</TableCell>
+                          <TableCell>Description</TableCell>
+                          <TableCell>Amount</TableCell>
+                          <TableCell>Category</TableCell>
+                          <TableCell></TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {transactions.map((tx, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell>{formatDate(tx.date)}</TableCell>
+                            <TableCell>{tx.description}</TableCell>
+                            <TableCell sx={{ color: tx.amount < 0 ? '#e57373' : '#81c784' }}>{formatAmount(tx.amount)}</TableCell>
+                            <TableCell>{tx.category}</TableCell>
+                            <TableCell>
+                              <Button size="small" variant="contained" onClick={() => handleSelectMatch(idx)}>Select</Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </DialogContent>
+                <DialogActions>
+                  <Button onClick={() => setMatchDialogOpen(false)}>Cancel</Button>
+                </DialogActions>
+              </MuiDialog>
+            </Box>
+          )}
+          {bankStep === 2 && (
+            <Box>
+              <Typography sx={{ mb: 2 }}>Unmatched Transactions:</Typography>
+              {unmatched.length === 0 ? (
+                <Typography color="success.main">All transactions matched or added!</Typography>
+              ) : (
+                <TableContainer>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Date</TableCell>
+                        <TableCell>Description</TableCell>
+                        <TableCell>Amount</TableCell>
+                        <TableCell>Category</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {unmatched.map(tx => (
+                        <TableRow key={tx.id}>
+                          <TableCell>{formatDate(tx.date)}</TableCell>
+                          <TableCell>{tx.description}</TableCell>
+                          <TableCell sx={{ color: tx.amount < 0 ? '#e57373' : '#81c784' }}>{formatAmount(tx.amount)}</TableCell>
+                          <TableCell>{tx.category}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </Box>
+          )}
+          {bankStep === 3 && (
+            <Box>
+              <Typography sx={{ mb: 2 }}>Reconciliation Summary</Typography>
+              <Box sx={{ display: 'flex', gap: 6, alignItems: 'center', mb: 2 }}>
+                <Box>
+                  <Typography variant="subtitle2">Bank Statement Balance</Typography>
+                  <Typography variant="h6">{formatAmount(mockBankTransactions.reduce((sum, tx) => sum + tx.amount, 0))}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2">QuickBooks Balance</Typography>
+                  <Typography variant="h6">{formatAmount(mockBankTransactions.reduce((sum, tx) => sum + tx.amount, 0))}</Typography>
+                </Box>
+              </Box>
+              <Typography>All steps complete. Click Confirm to finish.</Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          {bankStep > 0 && <Button onClick={() => setBankStep(bankStep - 1)}>Back</Button>}
+          {bankStep < 3 && <Button onClick={() => setBankStep(bankStep + 1)} variant="contained">Next</Button>}
+          {bankStep === 3 && <Button onClick={handleCloseBankWizard} variant="contained">Confirm</Button>}
+        </DialogActions>
       </Dialog>
     </Box>
   );
